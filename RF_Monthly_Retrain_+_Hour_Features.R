@@ -1,0 +1,94 @@
+featureEngineer <- function(df){
+        
+    names <- c("season", "holiday", "workingday", "weather")
+    #     df[,names] <- lapply(df[,names],factor)
+    df[,names] <- lapply(df[,names],ordered)
+    
+    df$datetime <- as.character(df$datetime)
+    df$datetime <- strptime(df$datetime, format = "%Y-%m-%d %T", tz="EST")
+    
+    df$hour <- as.integer(substr(df$datetime, 12, 13))
+    df$hour <- as.factor(df$hour)
+    
+    df$weekday <- as.factor(weekdays(df$datetime))
+    df$weekday <- factor(df$weekday, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", 
+                                                "Friday", "Saturday", "Sunday"))
+    
+    df$month <- as.integer(substr(df$datetime, 6,7))
+    df$year <- as.integer(substr(df$datetime,1,4))
+    
+    
+    hrs <- as.numeric(df$hour)
+    #create daypart column, default to 4 to make things easier for ourselves
+    df$hour2block <- round(hrs/2)
+    df$hour3block <- round(hrs/3)+1
+    df$hour5block <- round(hrs+2/5)    
+    df$hour7block <- round(hrs+4/7)+1
+    
+#     print(df$hour)
+#     
+#     print(df$hour/2)
+    
+    
+    
+
+
+    return(df)
+}
+
+library(randomForest)
+
+if(getwd() != "Documents/MSc_Term2/Kaggle4"){
+    setwd("Documents/MSc_Term2/Kaggle4")
+}
+
+train <- read.csv("train.csv")
+test <- read.csv("test.csv")
+# pairs(train)
+
+trainNew <- featureEngineer(train)
+testNew <- featureEngineer(test)
+
+is.factor(trainNew$hour)
+is.factor(trainNew$weekday)
+
+
+myNTree = 10000
+myMTry = 5
+myImportance = TRUE
+set.seed(415)
+
+
+testTrain <- subset(trainNew, select = -c(datetime, count, registered))
+# testFit <- randomForest(casual ~ ., data = testTrain, ntree = myNTree, mtry = myMTry, importance = myImportance)
+
+testTrain <- subset(trainNew, select = -c(datetime, count, casual))
+# testFit <- randomForest(registered ~ ., data = testTrain, nTree = myNTree, mtry = myMTry, importance = myImportance)
+
+for (munf in 1:24) {
+    
+    print(munf)
+    
+    if (munf<=12){  thisTrain <- trainNew[trainNew$month <= munf & trainNew$year == 2011, ]
+    }else{ thisTrain <- trainNew[trainNew$month <= (munf-12) | trainNew$year == 2011, ]
+    }
+    
+    casualFit <- randomForest(casual ~ hour + year + humidity +temp + atemp + workingday + hour2block + hour3block
+                              + hour5block +  hour7block + weekday + month, data = thisTrain, ntree = myNTree,
+                              mtry = myMTry, importance = myImportance)
+    registeredFit <- randomForest(registered ~ hour + year + month + weather + hour2block + hour3block + hour5block + 
+                                      hour7block + workingday + humidity + weekday + atemp, data = thisTrain, 
+                                  ntree = myNTree, mtry = myMTry, importance = myImportance)
+    
+    #rs: ROW SELECTOR. the boolean vector for selecting the rows from the test set
+    rs <- testNew$month == (((munf-1) %% 12)+1) & testNew$year == 2011 + floor((munf-1)/12)
+    
+    test$casual[rs] <- predict(casualFit, testNew[rs, ])
+    test$registered[rs] <- predict(registeredFit, testNew[rs, ])
+    
+    test$count[rs] <- round(test$casual[rs] + test$registered[rs], 0)
+}
+
+plot(test$count)
+submit <- data.frame(datetime = test$datetime, count = test$count)
+write.csv(submit, file = "rf_17Mar2004.csv", row.names = FALSE)
