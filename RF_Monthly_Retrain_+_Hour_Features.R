@@ -1,8 +1,9 @@
 featureEngineer <- function(df){
         
     names <- c("season", "holiday", "workingday", "weather")
-    #     df[,names] <- lapply(df[,names],factor)
     df[,names] <- lapply(df[,names],ordered)
+    
+    nrow = length(df$weather)
     
     df$datetime <- as.character(df$datetime)
     df$datetime <- strptime(df$datetime, format = "%Y-%m-%d %T", tz="EST")
@@ -24,23 +25,38 @@ featureEngineer <- function(df){
     df$hour3block <- round(hrs/3)+1
     df$hour5block <- round(hrs+2/5)    
     df$hour7block <- round(hrs+4/7)+1
-    
-#     print(df$hour)
-#     
-#     print(df$hour/2)
-    
+    #     df$hour4block <- round(hrs/4)
+    #     df$hour6block <- round(hrs/3)+1
+    #     df$hour8block <- round(hrs+2/5)    
     
     
+    num_weather <- as.numeric(df$weather) #convert from unordered factor into numeric
+    num_hour <- as.numeric(df$hour) #convert from unordered factor into numeric
+    
+    
+    df$coldnwetness <- pmax(num_weather - 2, 0) * pmax(20 - df$temp, 1)
+    df$windynwetness <- pmax(num_weather - 2, 0) * df$windspeed
+    df$coldnwetness2 <- num_weather^2 * pmax(20 - df$temp, 1)
+    df$windynwetness2 <- num_weather^2 * df$windspeed
+    
+    df$coldwindyness <-  pmax(20 - df$temp, 1) * df$windspeed
+    df$coldwindywetness <- (pmax(20 - df$temp, 1) * df$windspeed)^((num_weather+1)/2)
+    df$darkwetness <- abs(14 - num_hour)^(pmax(num_weather-1,1))
+    df$darkwindyness <- max(abs(14 - num_hour)-4, 1) * df$windspeed
+    df$quarter <- ceiling(df$month/4)
+    df$sixth <- ceiling(df$month/6)
 
-
+    
     return(df)
 }
 
+
+# START
 library(randomForest)
 
-if(getwd() != "Documents/MSc_Term2/Kaggle4"){
-    setwd("Documents/MSc_Term2/Kaggle4")
-}
+# if(getwd() != "/Users/lionelward/Documents/MSc_Term2/Kaggle4"){
+#     setwd("Documents/MSc_Term2/Kaggle4")
+# }
 
 train <- read.csv("train.csv")
 test <- read.csv("test.csv")
@@ -53,16 +69,17 @@ is.factor(trainNew$hour)
 is.factor(trainNew$weekday)
 
 
-myNTree = 10000
+myNTree = 2500
 myMTry = 5
 myImportance = TRUE
 set.seed(415)
 
 
-testTrain <- subset(trainNew, select = -c(datetime, count, registered))
+# #the following code does importance analysis 
+# testTrain <- subset(trainNew, select = -c(datetime, count, registered))
 # testFit <- randomForest(casual ~ ., data = testTrain, ntree = myNTree, mtry = myMTry, importance = myImportance)
-
-testTrain <- subset(trainNew, select = -c(datetime, count, casual))
+# 
+# testTrain <- subset(trainNew, select = -c(datetime, count, casual))
 # testFit <- randomForest(registered ~ ., data = testTrain, nTree = myNTree, mtry = myMTry, importance = myImportance)
 
 for (munf in 1:24) {
@@ -74,10 +91,12 @@ for (munf in 1:24) {
     }
     
     casualFit <- randomForest(casual ~ hour + year + humidity +temp + atemp + workingday + hour2block + hour3block
-                              + hour5block +  hour7block + weekday + month, data = thisTrain, ntree = myNTree,
+                              + hour5block +  hour7block + weekday + month + coldnwetness +  windynwetness
+                              + darkwetness + darkwindyness + quarter + sixth, data = thisTrain, ntree = myNTree,
                               mtry = myMTry, importance = myImportance)
     registeredFit <- randomForest(registered ~ hour + year + month + weather + hour2block + hour3block + hour5block + 
-                                      hour7block + workingday + humidity + weekday + atemp, data = thisTrain, 
+                                      hour7block + workingday + humidity + weekday + atemp+ coldnwetness +  windynwetness
+                                  + darkwetness + darkwindyness + quarter + sixth, data = thisTrain, 
                                   ntree = myNTree, mtry = myMTry, importance = myImportance)
     
     #rs: ROW SELECTOR. the boolean vector for selecting the rows from the test set
@@ -91,4 +110,4 @@ for (munf in 1:24) {
 
 plot(test$count)
 submit <- data.frame(datetime = test$datetime, count = test$count)
-write.csv(submit, file = "rf_17Mar2004.csv", row.names = FALSE)
+write.csv(submit, file = paste(format(Sys.time(), "%Y-%m-%d %I-%p"), "csv", sep = "."), row.names = FALSE)
